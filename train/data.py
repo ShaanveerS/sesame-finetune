@@ -37,7 +37,7 @@ def collate_fn(batch, mimi_model: MimiModel, codebook_size: int = 32):
         acoustic_codes = label[:, 1:-1].T
         final_residuals = quantizer.decode(acoustic_codes.unsqueeze(-1)).squeeze(-1)
         # zero text positions with the mask
-        mask = batch["ground_truth_masks"][1:, :-1].all(dim=1)
+        mask = item["ground_truth_masks"][1:, :-1].all(dim=1)
         final_residuals[~mask] = 0
         targets[i, :seq_len, :] = final_residuals.unsqueeze(0)
 

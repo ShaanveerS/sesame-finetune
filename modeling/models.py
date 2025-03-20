@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from einops import rearrange
 import torch
 import torch.nn as nn
 import torchtune
@@ -159,6 +160,9 @@ class Model(
         tokens_mask: torch.Tensor,
         input_pos: torch.Tensor,
     ) -> torch.Tensor:
+        """
+        Returns raw acoustic token hidden states
+        """
         dtype = next(self.parameters()).dtype
         b, s, _ = tokens.size()
 
@@ -169,8 +173,69 @@ class Model(
         h = self.backbone(h, input_pos=input_pos, mask=curr_backbone_mask).to(
             dtype=dtype
         )
+
+        x = self.projection(h)
+        # Skip final token
+        codebooks = tokens[:, :-2, :]
+        offset = torch.arange(
+            0, 
+            (self.config.audio_num_codebooks - 1) * self.config.audio_vocab_size, 
+            self.config.audio_vocab_size, 
+            device=x.device
+        )[:, None]
+
+        codebooks = codebooks + offset
+
+        # Unlike Moshi, we keep both the first hidden state and codebook 0
+        codebook_embeddings = self.audio_embeddings(codebooks)
+
+        x = torch.cat([x[:, None], codebook_embeddings], dim=1)
+
+        b, s = x.size(0), x.size(2)
+        # Flip the sequence to
+        # see https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice "compute amortization"
+        x = rearrange(x, 'b n s d -> (b s) n d')
+
+        # Remove padded positions
+        codebooks = rearrange(codebooks, 'b n s -> (b s) n')
+        # TODO handle full text-only batches - mask will be all True
+        codebook_mask = (codebooks == 0).all(dim=-1)
+
+        # get all audio positions
+        x_bs, x_len = x.size(0), x.size(1)
+        indices = torch.arange(x_bs, device=x.device)[~codebook_mask]
+        x = torch.index_select(x, 0, indices)
+
+        assert x_len == self.config.audio_num_codebooks
+
+        # create causal mask
+        curr_decoder_mask = _index_causal_mask(self.decoder_causal_mask, indices)
+        
+        # TODO this is almost certainly wrong
+        for layer in self.decoder:
+            # TODO gradient checkpointing probably
+            x = layer(x, mask=curr_decoder_mask)
+
         # Forward pass in parallel
-        raise ValueError("TODO")
+        # TODO codebook logits
+        HIDDEN_SIZE = 1024
+        buffer = torch.zeros(
+            x_bs,
+            x_len,
+            HIDDEN_SIZE,
+            dtype=dtype,
+            device=x.device
+        )
+        # TODO almost certainly wrong, validate tomorrow
+        buffer.scatter_(
+            0,
+            indices.view(-1, 1, 1).expand(-1, x_len, x.size(-1)),
+            x,
+        )
+        buffer = rearrange(buffer, '(b s) n d -> b s n d', b=b, s=s, n=HIDDEN_SIZE)
+
+        return buffer
+
 
     def generate_frame(
         self,
