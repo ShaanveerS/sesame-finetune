@@ -26,9 +26,7 @@ def collate_fn(batch, mimi_model: MimiModel, codebook_size: int = 32):
 
     B = len(batch)
     tokens = torch.full((B, max_input_len, height), 0, dtype=torch.long)  # 2=some <PAD>
-    targets = torch.full((B, 256, max_input_len), 0, dtype=torch.float32)
-
-    pad_mask = torch.ones(B, max_input_len)
+    targets = torch.full((B, max_input_len, 256), 0, dtype=torch.float32)
 
     for i, item in enumerate(batch):
         seq_len = item["ground_truth"].shape[0] - 1
@@ -36,31 +34,14 @@ def collate_fn(batch, mimi_model: MimiModel, codebook_size: int = 32):
 
         label = item["ground_truth"][1:, :]
         # full block of zeros for audio codes
-        codes = label[:, :-1]
-        final_residuals = quantizer.dequantize(codes)
+        acoustic_codes = label[:, 1:-1].T
+        final_residuals = quantizer.decode(acoustic_codes.unsqueeze(-1)).squeeze(-1)
         # zero text positions with the mask
         mask = batch["ground_truth_masks"][1:, :-1].all(dim=1)
         final_residuals[~mask] = 0
-        
+        targets[i, :seq_len, :] = final_residuals.unsqueeze(0)
 
-
-
-
-
-
-
-
-        # Get full dequantized codes
-
-
-        
-
-        labels[i, :seq_len, :] = label
-
-        # bookkeeping for ragged batches
-        pad_mask[i, :seq_len] = False
-
-    return {"tokens": tokens, "labels": labels, "pad_mask": pad_mask}
+    return {"tokens": tokens, "targets": targets}
 
 
 def create_dataloaders(config: TrainingConfig) -> tuple[DataLoader, DataLoader]:
