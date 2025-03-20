@@ -1,0 +1,5 @@
+checkpoint_folder = "checkpoints"
+
+[wandb]
+project_name = "csm_decoder_shortcut"
+use_wandb = false

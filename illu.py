@@ -1,14 +1,14 @@
-from fastrtc                import Stream, StreamHandler
-from fastrtc.tracks         import EmitType
-from silero_vad             import load_silero_vad, get_speech_timestamps
+from fastrtc import Stream, StreamHandler
+from fastrtc.tracks import EmitType
+from silero_vad import load_silero_vad, get_speech_timestamps
 from distil_whisper_fastrtc import get_stt_model
-from openai                 import OpenAI
-from typing                 import Generator, cast
-from generator              import load_csm_1b, Segment
-from queue                  import Queue, Empty
+from openai import OpenAI
+from typing import Generator, cast
+from modeling.generator import load_csm_1b, Segment
+from queue import Queue, Empty
 
 # import gradio as gr
-import numpy  as np
+import numpy as np
 import torch
 import torchaudio
 import click
@@ -16,12 +16,14 @@ import time
 import os
 import sys
 
+
 def load_audio_file(path):
     audio_tensor, sample_rate = torchaudio.load(path)
     audio_tensor = torchaudio.functional.resample(
         audio_tensor.squeeze(0), orig_freq=sample_rate, new_freq=24000
     )
     return audio_tensor
+
 
 # NOTE: this be where voice 'cloning' is configured. it's kinda shit; finetuning is the real play
 bootleg_maya = [
@@ -42,10 +44,16 @@ bootleg_maya = [
     ),
 ]
 
+
 class Chat(StreamHandler):
     def __init__(self, vad, stt, llm, csm, llm_model="co-2", system=None) -> None:
         # output at 50Hz or 20ms/frame for alignment with CSM and a reasonable amount of buffering
-        super().__init__("mono", input_sample_rate=16000, output_sample_rate=24000, output_frame_size=240)
+        super().__init__(
+            "mono",
+            input_sample_rate=16000,
+            output_sample_rate=24000,
+            output_frame_size=240,
+        )
 
         self.vad = vad
         self.stt = stt
@@ -97,7 +105,9 @@ class Chat(StreamHandler):
             self.llm_ctx.append({"role": "user", "content": self.speech})
 
             sp_buf = torch.tensor(np.concatenate(self.sp_buf)).squeeze(0)
-            sp_buf = torchaudio.functional.resample(sp_buf, orig_freq=rate, new_freq=24000)
+            sp_buf = torchaudio.functional.resample(
+                sp_buf, orig_freq=rate, new_freq=24000
+            )
             self.csm_ctx.append(Segment(text=self.speech, speaker=1, audio=sp_buf))
 
             self.sp_buf = []
@@ -122,16 +132,20 @@ class Chat(StreamHandler):
 
         s = time.process_time()
 
-        resp = self.llm.chat.completions.create(model=self.llm_model, messages=llm_ctx, temperature=1.3)
+        resp = self.llm.chat.completions.create(
+            model=self.llm_model, messages=llm_ctx, temperature=1.3
+        )
         message = resp.choices[0].message.content
 
         e = time.process_time()
-        print(f"LLM in {(e-s)*1000}ms")
+        print(f"LLM in {(e - s) * 1000}ms")
         print(f"message: {message}")
 
         # resampling to CSM 24KHz
         rate, sp_buf = sp_buf
-        sp_buf = torchaudio.functional.resample(torch.tensor(sp_buf).squeeze(0), orig_freq=rate, new_freq=24000)
+        sp_buf = torchaudio.functional.resample(
+            torch.tensor(sp_buf).squeeze(0), orig_freq=rate, new_freq=24000
+        )
 
         # build CSM context
         csm_ctx = bootleg_maya + self.csm_ctx[-7:]
@@ -142,8 +156,8 @@ class Chat(StreamHandler):
         for frame in self.csm.generate(text=message, speaker=0, context=csm_ctx):
             if len(csm_gen) == 0:
                 e = time.process_time()
-                print(f"CSM in {(e-s)*1000}ms (first frame)")
-                print(f"TTFF {(e-true_start)*1000}ms")
+                print(f"CSM in {(e - s) * 1000}ms (first frame)")
+                print(f"TTFF {(e - true_start) * 1000}ms")
 
             csm_gen.append(frame)
             frame = frame.unsqueeze(0).cpu().numpy()
@@ -166,13 +180,15 @@ class Chat(StreamHandler):
         self.rx_buf = np.concatenate((self.rx_buf, np.squeeze(frame)))
 
         # min_silence_duration of 0 ensures we can discard the rest without problems
-        ts = get_speech_timestamps(self.rx_buf, self.vad, min_speech_duration_ms=150, min_silence_duration_ms=0)
+        ts = get_speech_timestamps(
+            self.rx_buf, self.vad, min_speech_duration_ms=150, min_silence_duration_ms=0
+        )
 
         if len(ts) > 0:
             # stopped speaking? flush and clear buffer
-            if ts[-1]['end'] != len(self.rx_buf):
+            if ts[-1]["end"] != len(self.rx_buf):
                 for i in ts:
-                    self.sp_buf.append(self.rx_buf[i['start'] : i['end']])
+                    self.sp_buf.append(self.rx_buf[i["start"] : i["end"]])
                 self.rx_buf = np.empty(0, dtype=np.float32)
                 self.paused_at = time.process_time()
                 return True
@@ -180,7 +196,7 @@ class Chat(StreamHandler):
                 self.paused_at = None
         # prune a frame if silence is too long (last bit may be the start of some unrecognized speech)
         elif (len(self.rx_buf) / rate) >= 0.5:
-            self.rx_buf = self.rx_buf[len(frame):]
+            self.rx_buf = self.rx_buf[len(frame) :]
 
         return False
 
@@ -205,17 +221,26 @@ class Chat(StreamHandler):
                 self.flight = None
 
     def copy(self) -> StreamHandler:
-        return Chat(self.vad, self.stt, self.llm, self.csm, llm_model=self.llm_model, system=self.system)
+        return Chat(
+            self.vad,
+            self.stt,
+            self.llm,
+            self.csm,
+            llm_model=self.llm_model,
+            system=self.system,
+        )
 
-    def start_up(self) -> None: # called on stream start
+    def start_up(self) -> None:  # called on stream start
         pass
 
-    def shutdown(self) -> None: # called on stream close
+    def shutdown(self) -> None:  # called on stream close
         pass
+
 
 def stderr(msg):
     sys.stderr.write(msg)
     sys.stderr.flush()
+
 
 if __name__ == "__main__":
     # VAD: figure out if you're talking
@@ -223,11 +248,13 @@ if __name__ == "__main__":
 
     # STT: figure out tf you said
     # https://github.com/Codeblockz/distil-whisper-FastRTC?tab=readme-ov-file#available-models
-    stt = get_stt_model("distil-whisper/distil-small.en", device="cuda", dtype="float16")
+    stt = get_stt_model(
+        "distil-whisper/distil-small.en", device="cuda", dtype="float16"
+    )
 
     # LLM: figure out what to say
     # TODO: warmup (ctx caching)
-    api_key  = os.environ.get("OPENAI_API_KEY")  or "eyy_lmao"
+    api_key = os.environ.get("OPENAI_API_KEY") or "eyy_lmao"
     api_base = os.environ.get("OPENAI_BASE_URL") or "http://127.0.0.1:8000/v1"
     llm = OpenAI(api_key=api_key, base_url=api_base)
 

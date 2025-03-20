@@ -1,7 +1,13 @@
 # illu - realtime conversational dynamics
+
+---
+
+# Original README below
+
 4 models in a trenchcoat walk into a bar (3090 edition)
 
 # usage
+
 clone the repo and use `uv` or something:
 
 ```shell
@@ -19,8 +25,10 @@ make
 have fun
 
 # configuration
+
 it checks `OPENAI_API_KEY` and `OPENAI_BASE_URL` env vars if you want to point it at whatever LLM. defaults to an
 api on localhost:8000 (if unset) to make it convenient for me personally.
 
 # resource reqs
+
 ~6.5 GB VRAM + whatever your LLM uses if you run that locally
