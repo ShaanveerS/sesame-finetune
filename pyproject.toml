@@ -8,6 +8,7 @@ dependencies = [
     "click>=8.1.8",
     "datasets>=3.4.1",
     "einops>=0.8.1",
+    "fastrtc>=0.0.17",
     "gradio>=5.22.0",
     "moshi==0.2.2",
     "numpy==2.1.0",
@@ -26,7 +27,7 @@ dependencies = [
 dev = ["ipykernel>=6.29.5"]
 
 [tool.setuptools]
-packages = ["data_pipeline", "modeling", "train"]
+packages = ["data_pipeline", "modeling", "training_harness"]
 
 [tool.uv.workspace]
-members = ["modeling"]
+members = ["modeling", "training_harness"]
