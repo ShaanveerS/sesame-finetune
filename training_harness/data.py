@@ -48,19 +48,21 @@ def collate_fn_mse(batch, mimi_model: MimiModel, codebook_size: int = 32):
 
     return {"tokens": tokens, "targets": targets, "tokens_masks": tokens_masks, "pad_mask": pad_mask}
 
-# TODO clean this up
 def collate_fn(batch, codebook_size: int = 32):
     """
     batch is a list of dicts: each dict has "tokens" shape [depth+1, T],
     and "labels" shape [depth+1, T].
     We pad them into [B, depth+1, T_max].
+
     """
     height = codebook_size + 1
-    max_input_len = max(item["ground_truth"].shape[0] - 1 for item in batch)
+    max_input_len = max(item["ground_truth"].shape[0] for item in batch) - 1
 
     B = len(batch)
     tokens = torch.full((B, max_input_len, height), 0, dtype=torch.long)  # 2=some <PAD>
     tokens_masks = torch.full((B, max_input_len, height), 0, dtype=torch.bool)
+    acoustic_codes = torch.full((B, max_input_len, height - 2), 0, dtype=torch.long)
+
     # CSM does not model text
     # Set all positions to MASK by default
     labels = torch.full((B, max_input_len, codebook_size), -100, dtype=torch.long)
@@ -71,14 +73,17 @@ def collate_fn(batch, codebook_size: int = 32):
         tokens[i, :seq_len, :] = item["ground_truth"][:-1, :].clone()
         tokens_masks[i, :seq_len, :] = item["ground_truth_masks"][:-1, :].clone()
         pad_mask[i, :seq_len] = True
+        # NOTE! The acoustic codes are for step $n+1$ rather than $n$, and omit step 32.
+        # This is because the temporal transformer is causal _within_ not across a global timestep.
+        acoustic_codes[i, :seq_len, :] = item["ground_truth"][1:, :-2].clone()
 
-
+        # Predict audio codes causally shifted
         shifted = item["ground_truth"][1:, :-1].clone()
         mask = item["ground_truth_masks"][1:, :-1].all(dim=1)
         shifted[~mask] = -100
         labels[i, :seq_len, :] = shifted
 
-    return {"tokens": tokens, "tokens_masks": tokens_masks, "labels": labels, "pad_mask": pad_mask}
+    return {"tokens": tokens, "tokens_masks": tokens_masks, "acoustic_codes": acoustic_codes, "labels": labels, "pad_mask": pad_mask}
 
 
 

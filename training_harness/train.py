@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from training_harness.config import TrainingConfig
 from typing import NamedTuple
+from tqdm import tqdm
 
 from modeling.shortcut_layer import ShortcutLayer
 
@@ -22,15 +23,21 @@ def compute_losses_mse(outputs, targets, tokens_masks):
     loss = torch.sum(semantic_loss) / torch.sum(acoustic_mask)
     return loss
 
-def compute_losses_logits(logits, labels):
+def compute_losses_logits(all_logits, labels):
     # for better or worse, loss is on audio only
     print(labels.shape)
-    print(labels[0, 64:, :])
-    codebook_logits = rearrange(logits, "b s n d -> (b s n) d")
-    codebook_labels = rearrange(labels, "b s n -> (b s n)")
-    # TODO consider weighting code0 loss more
+    print(labels[0, :64, 0])
+    # logits = all_logits[:, :, 0, :].squeeze(-2)
+    codebook_labels = rearrange(labels[:, :, 1:], "b s n -> (b s n)")
+    codebook_logits = all_logits[:, :, 1:, :]
+    print("Argmax of logits for first sample:")
+    print(codebook_logits[0, :64, 0].argmax(dim=-1))
+
+    codebook_logits = rearrange(codebook_logits, "b s n d -> (b s n) d")
+
     print(codebook_logits.shape, codebook_labels.shape)
     print(codebook_logits.dtype, codebook_labels.dtype)
+    # TODO consider weighting code0 loss more
     loss = F.cross_entropy(
         codebook_logits,
         codebook_labels,
@@ -56,8 +63,9 @@ def train_step(
     pad_mask = batch["pad_mask"].to(device)
     # targets = batch["targets"].to(device)
     labels = batch["labels"].to(device)
+    acoustic_codes = batch["acoustic_codes"].to(device)
 
-    codebook_logits = model(tokens=tokens, tokens_mask=tokens_masks, key_padding_mask=pad_mask)
+    codebook_logits = model(tokens=tokens, tokens_mask=tokens_masks, acoustic_codes=acoustic_codes, key_padding_mask=pad_mask)
 
     # shortcut_hidden_states = acoustic_hidden_states[:, :, shortcut_idx, :]
     # # TODO do i need to squeeze n?
@@ -85,7 +93,7 @@ def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoad
 
     device = torch.device("cuda")
     for epoch in range(config.num_epochs):
-        for batch in train_loader:
+        for batch in tqdm(train_loader):
             print(batch.keys())
             train_step(model, shortcut, batch, optimizer, scheduler, device, config.optim.gradient_clip)
 

@@ -1,11 +1,10 @@
 from dataclasses import dataclass
-
 from einops import rearrange
+from huggingface_hub import PyTorchModelHubMixin
 import torch
 import torch.nn as nn
 import torchtune
 from torchtune.generation._generation import get_causal_mask_from_padding_mask
-from huggingface_hub import PyTorchModelHubMixin
 from torchtune.models import llama3_2
 
 
@@ -159,6 +158,7 @@ class Model(
         self,
         tokens: torch.Tensor,
         tokens_mask: torch.Tensor,
+        acoustic_codes: torch.Tensor,
         key_padding_mask: torch.Tensor,
         skip_audio_proj: bool = False,
     ) -> torch.Tensor:
@@ -167,7 +167,6 @@ class Model(
         """
         dtype = next(self.parameters()).dtype
 
-        print(f"TOKENS SHAPE: {tokens.shape}")
         curr_backbone_mask = get_causal_mask_from_padding_mask(key_padding_mask)
         embeds = self._embed_tokens(tokens)
         masked_embeds = embeds * tokens_mask.unsqueeze(-1)
@@ -176,24 +175,21 @@ class Model(
             dtype=dtype
         )
         c0_logits = self.codebook0_head(h)
-        x = self.projection(h)
 
         # Remove codebook 32
-        codebooks = tokens[:, :, :-2]
+        codebooks = acoustic_codes
         offset = torch.arange(
             0, 
             (self.config.audio_num_codebooks - 1) * self.config.audio_vocab_size, 
             self.config.audio_vocab_size, 
-            device=x.device
+            device=h.device
         )
         codebooks_offset = codebooks + offset
         codebook_embeddings_full = self.audio_embeddings(codebooks_offset)
-        # Project to decoder dimension. See decoder_h below
-        codebook_embeddings = self.projection(codebook_embeddings_full)
 
         # Insert backbone embeddings as first position
-        x = torch.cat([x.unsqueeze(-2), codebook_embeddings], dim=-2)
-        print(f"X SHAPE after concat: {x.shape}")
+        x = torch.cat([h.unsqueeze(-2), codebook_embeddings_full], dim=-2)
+        x = self.projection(x)
 
         global_bsz = x.size(0)
         # Flip the sequence so decoder is trained in parallel across codebook depth
@@ -202,9 +198,8 @@ class Model(
 
         # Remove text-only positions
         codebooks = rearrange(codebooks, 'b n s -> (b n) s')
-        print(f"CODEBOOKS AFTER FLIP: {codebooks.shape}")
-        # TODO handle full text-only batches - mask will be all True
-        # Likely not a problem for now though, since no loss on text positions anyway
+        # NOTE: This will be all True for text-only batches.
+        # The model was not trained with text output head though, so if this fails, this is 100% on you
         codebook_mask = (codebooks == 0).all(dim=-1)
 
         # Extract audio positions
@@ -215,23 +210,19 @@ class Model(
 
         assert decoder_seqlen == self.config.audio_num_codebooks
 
-        for layer in self.decoder.layers:
-            # TODO gradient checkpointing probably needs to be added
-            # Uses standard causal mask b/c resolution is single step + global emb
-            x = layer(x)
+        # Mask and input pos are defaults, no need to pass
+        x = self.decoder(x).to(next(self.parameters()).dtype)
 
-        print(f"OUT SHAPE: {x.shape}")
-        # Forward pass in parallel
-
-        # TODO make this configurable
+        # TODO make this configurable, people doing regular SFT please ignore
         output_dim = self.config.audio_vocab_size if not skip_audio_proj else 1024
         if not skip_audio_proj:
             # Audio head is (31, 1024, 2051). Ignore decoder prediction for codebook 0
             # Per Sesame authors, losses for decoder are only computed on codebooks 1 and up
             x = torch.einsum('bch, cho -> bco', x[:, 1:, :], self.audio_head)
-            
 
         buffer_len = decoder_seqlen - 1
+        buffer = rearrange(x, '(b n) s d -> b n s d', b=global_bsz, s=buffer_len, d=output_dim)
+
         buffer = torch.zeros(
             decoder_bsz,
             buffer_len,
@@ -250,7 +241,6 @@ class Model(
             return buffer
 
         buffer = torch.cat([c0_logits.unsqueeze(-2), buffer], dim=-2)
-        print(f"BUFFER SHAPE: {buffer.shape}")
         return buffer
 
 
