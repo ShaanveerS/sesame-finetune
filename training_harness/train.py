@@ -38,7 +38,8 @@ def train_step(
     tokens = batch["tokens"].to(device)
     tokens_masks = batch["tokens_masks"].to(device)
     pad_mask = batch["pad_mask"].to(device)
-    targets = batch["targets"].to(device)
+    # targets = batch["targets"].to(device)
+    labels = batch["labels"].to(device)
 
     # b s n d
     acoustic_hidden_states = model(tokens=tokens, tokens_mask=tokens_masks, key_padding_mask=pad_mask)

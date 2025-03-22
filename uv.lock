@@ -2906,6 +2906,16 @@ name = "training-harness"
 version = "0.1.0"
 source = { virtual = "training_harness" }
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.5" }]
+
 [[package]]
 name = "traitlets"
 version = "5.14.3"
