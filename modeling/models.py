@@ -166,106 +166,91 @@ class Model(
         Returns raw acoustic token hidden states
         """
         dtype = next(self.parameters()).dtype
-        b, s, _ = tokens.size()
 
+        print(f"TOKENS SHAPE: {tokens.shape}")
         curr_backbone_mask = get_causal_mask_from_padding_mask(key_padding_mask)
         embeds = self._embed_tokens(tokens)
         masked_embeds = embeds * tokens_mask.unsqueeze(-1)
-        h = masked_embeds.sum(dim=2)
+        h = masked_embeds.sum(dim=-2)
         h = self.backbone(h, mask=curr_backbone_mask).to(
             dtype=dtype
         )
-
         c0_logits = self.codebook0_head(h)
-        print(c0_logits.shape)
         x = self.projection(h)
-        # Skip final token
-        print(f"TOKENS SHAPE: {tokens.shape}")
+
+        # Remove codebook 32
         codebooks = tokens[:, :, :-2]
-        print(f"CODEBOOKS BEFORE FLIP") 
-        print(codebooks[0, :32, :])
         offset = torch.arange(
             0, 
             (self.config.audio_num_codebooks - 1) * self.config.audio_vocab_size, 
             self.config.audio_vocab_size, 
             device=x.device
         )
-
-        codebooks = codebooks + offset
-
-        # Unlike Moshi, we keep both the first hidden state and codebook 0
-        codebook_embeddings_full = self.audio_embeddings(codebooks)
+        codebooks_offset = codebooks + offset
+        codebook_embeddings_full = self.audio_embeddings(codebooks_offset)
         # Project to decoder dimension. See decoder_h below
         codebook_embeddings = self.projection(codebook_embeddings_full)
 
+        # Insert backbone embeddings as first position
         x = torch.cat([x.unsqueeze(-2), codebook_embeddings], dim=-2)
+        print(f"X SHAPE after concat: {x.shape}")
 
-        b, s = x.size(0), x.size(2)
-        # Flip the sequence to
+        global_bsz = x.size(0)
+        # Flip the sequence so decoder is trained in parallel across codebook depth
         # see https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice "compute amortization"
         x = rearrange(x, 'b n s d -> (b n) s d')
-        # print(f"FLIPPED: {x.shape}")
 
-        # raise ValueError("TEST")
-        # Remove padded positions
+        # Remove text-only positions
         codebooks = rearrange(codebooks, 'b n s -> (b n) s')
         print(f"CODEBOOKS AFTER FLIP: {codebooks.shape}")
         # TODO handle full text-only batches - mask will be all True
+        # Likely not a problem for now though, since no loss on text positions anyway
         codebook_mask = (codebooks == 0).all(dim=-1)
 
-        # get all audio positions
-        x_bs, x_len = x.size(0), x.size(1)
-        indices = torch.arange(x_bs, device=x.device)[~codebook_mask]
+        # Extract audio positions
+        # TODO add compute amortization here
+        decoder_bsz, decoder_seqlen = x.size(0), x.size(1)
+        indices = torch.arange(decoder_bsz, device=x.device)[~codebook_mask]
         x = torch.index_select(x, 0, indices)
 
-        assert x_len == self.config.audio_num_codebooks
-
-        # create causal mask
-        # curr_decoder_mask = _index_causal_mask(self.decoder_causal_mask, indices)[None, None, :, :]
-        # print(curr_decoder_mask.shape)
-        
-        # TODO this is almost certainly wrong
-        # TODO add compute amortization here
+        assert decoder_seqlen == self.config.audio_num_codebooks
 
         for layer in self.decoder.layers:
             # TODO gradient checkpointing probably needs to be added
+            # Uses standard causal mask b/c resolution is single step + global emb
             x = layer(x)
 
         print(f"OUT SHAPE: {x.shape}")
         # Forward pass in parallel
-        # TODO codebook logits
 
         # TODO make this configurable
         output_dim = self.config.audio_vocab_size if not skip_audio_proj else 1024
         if not skip_audio_proj:
-            print(self.audio_head.shape)
-            print(x.shape)
+            # Audio head is (31, 1024, 2051). Ignore decoder prediction for codebook 0
             # Per Sesame authors, losses for decoder are only computed on codebooks 1 and up
             x = torch.einsum('bch, cho -> bco', x[:, 1:, :], self.audio_head)
             
 
-        buffer_len = x_len - 1
+        buffer_len = decoder_seqlen - 1
         buffer = torch.zeros(
-            x_bs,
+            decoder_bsz,
             buffer_len,
             output_dim,
             dtype=dtype,
             device=x.device
         )
-        print(buffer.shape)
-        # TODO almost certainly wrong, validate tomorrow
         buffer.scatter_(
             0,
             indices.view(-1, 1, 1).expand(-1, buffer_len, x.size(-1)),
             x,
         )
-        buffer = rearrange(buffer, '(b n) s d -> b n s d', b=b, s=buffer_len, d=output_dim)
+        buffer = rearrange(buffer, '(b n) s d -> b n s d', b=global_bsz, s=buffer_len, d=output_dim)
 
         if skip_audio_proj:
             return buffer
 
         buffer = torch.cat([c0_logits.unsqueeze(-2), buffer], dim=-2)
-        raise ValueError("TEST")
+        print(f"BUFFER SHAPE: {buffer.shape}")
         return buffer
 
 

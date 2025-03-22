@@ -63,7 +63,7 @@ def collate_fn(batch, codebook_size: int = 32):
     tokens_masks = torch.full((B, max_input_len, height), 0, dtype=torch.bool)
     # CSM does not model text
     # Set all positions to MASK by default
-    labels = torch.full((B, max_input_len, codebook_size), -100, dtype=torch.float32)
+    labels = torch.full((B, max_input_len, codebook_size), -100, dtype=torch.long)
     pad_mask = torch.full((B, max_input_len), False, dtype=torch.bool)
 
     for i, item in enumerate(batch):

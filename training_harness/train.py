@@ -2,7 +2,7 @@ import torch
 from einops import rearrange
 from torch.optim import Optimizer, AdamW
 from torch.utils.data import DataLoader
-import torch.functional as F
+import torch.nn.functional as F
 from training_harness.config import TrainingConfig
 from typing import NamedTuple
 
@@ -24,13 +24,19 @@ def compute_losses_mse(outputs, targets, tokens_masks):
 
 def compute_losses_logits(logits, labels):
     # for better or worse, loss is on audio only
+    print(labels.shape)
+    print(labels[0, 64:, :])
     codebook_logits = rearrange(logits, "b s n d -> (b s n) d")
     codebook_labels = rearrange(labels, "b s n -> (b s n)")
+    # TODO consider weighting code0 loss more
+    print(codebook_logits.shape, codebook_labels.shape)
+    print(codebook_logits.dtype, codebook_labels.dtype)
     loss = F.cross_entropy(
         codebook_logits,
         codebook_labels,
         ignore_index=-100,
     )
+    print(loss.item())
     return loss
 
 
@@ -58,6 +64,7 @@ def train_step(
     # outputs = shortcut(shortcut_hidden_states)
     # loss = compute_losses_mse(outputs, targets, tokens_masks)
     loss = compute_losses_logits(codebook_logits, labels)
+    raise ValueError("TEST")
 
 
     optimizer.zero_grad()
