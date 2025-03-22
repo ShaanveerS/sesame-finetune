@@ -42,9 +42,11 @@ class Generator:
     def __init__(
         self,
         model: Model,
+        setup_caches: bool = True,
     ):
         self._model = model
-        self._model.setup_caches(1)
+        if setup_caches:
+            self._model.setup_caches(1)
 
         self._text_tokenizer = load_llama3_tokenizer()
 
@@ -187,10 +189,10 @@ class Generator:
             yield frame
 
 
-def load_csm_1b(device: str = "cuda") -> Generator:
+def load_csm_1b(device: str = "cuda", setup_caches: bool = True) -> Generator:
     model = Model.from_pretrained("sesame/csm-1b")
     model.to(device=device, dtype=torch.bfloat16)
     model.decoder = torch.compile(model.decoder, fullgraph=True, mode="reduce-overhead")
 
-    generator = Generator(model)
+    generator = Generator(model, setup_caches=setup_caches)
     return generator

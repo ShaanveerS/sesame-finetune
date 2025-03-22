@@ -21,6 +21,9 @@ def compute_losses_mse(outputs, targets, tokens_masks):
     loss = torch.sum(semantic_loss) / torch.sum(acoustic_mask)
     return loss
 
+# ef compute_losses_logits(logits, targets, tokens_masks):
+
+
 def train_step(
     model: torch.nn.Module,
     shortcut: ShortcutLayer,
@@ -38,7 +41,7 @@ def train_step(
     targets = batch["targets"].to(device)
 
     # b s n d
-    acoustic_hidden_states = model(inp=tokens, key_padding_mask=pad_mask)
+    acoustic_hidden_states = model(tokens=tokens, tokens_mask=tokens_masks, key_padding_mask=pad_mask)
 
     shortcut_hidden_states = acoustic_hidden_states[:, :, shortcut_idx, :]
     # TODO do i need to squeeze n?

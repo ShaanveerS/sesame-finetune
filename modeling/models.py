@@ -4,6 +4,7 @@ from einops import rearrange
 import torch
 import torch.nn as nn
 import torchtune
+from torchtune.generation._generation import get_causal_mask_from_padding_mask
 from huggingface_hub import PyTorchModelHubMixin
 from torchtune.models import llama3_2
 
@@ -131,6 +132,10 @@ class Model(
                 config.audio_num_codebooks - 1, decoder_dim, config.audio_vocab_size
             )
         )
+        self.register_buffer(
+            "decoder_causal_mask",
+            _create_causal_mask(self.config.audio_num_codebooks, self.audio_head.device),
+        )
 
     def setup_caches(self, max_batch_size: int) -> torch.Tensor:
         """Setup KV caches and return a causal mask."""
@@ -149,16 +154,13 @@ class Model(
             "backbone_causal_mask",
             _create_causal_mask(self.backbone.max_seq_len, device),
         )
-        self.register_buffer(
-            "decoder_causal_mask",
-            _create_causal_mask(self.config.audio_num_codebooks, device),
-        )
 
     def forward(
         self,
         tokens: torch.Tensor,
         tokens_mask: torch.Tensor,
-        input_pos: torch.Tensor,
+        key_padding_mask: torch.Tensor,
+        skip_audio_proj: bool = False,
     ) -> torch.Tensor:
         """
         Returns raw acoustic token hidden states
@@ -166,38 +168,48 @@ class Model(
         dtype = next(self.parameters()).dtype
         b, s, _ = tokens.size()
 
-        curr_backbone_mask = _index_causal_mask(self.backbone_causal_mask, input_pos)
+        curr_backbone_mask = get_causal_mask_from_padding_mask(key_padding_mask)
         embeds = self._embed_tokens(tokens)
         masked_embeds = embeds * tokens_mask.unsqueeze(-1)
         h = masked_embeds.sum(dim=2)
-        h = self.backbone(h, input_pos=input_pos, mask=curr_backbone_mask).to(
+        h = self.backbone(h, mask=curr_backbone_mask).to(
             dtype=dtype
         )
 
+        c0_logits = self.codebook0_head(h)
+        print(c0_logits.shape)
         x = self.projection(h)
         # Skip final token
-        codebooks = tokens[:, :-2, :]
+        print(f"TOKENS SHAPE: {tokens.shape}")
+        codebooks = tokens[:, :, :-2]
+        print(f"CODEBOOKS BEFORE FLIP") 
+        print(codebooks[0, :32, :])
         offset = torch.arange(
             0, 
             (self.config.audio_num_codebooks - 1) * self.config.audio_vocab_size, 
             self.config.audio_vocab_size, 
             device=x.device
-        )[:, None]
+        )
 
         codebooks = codebooks + offset
 
         # Unlike Moshi, we keep both the first hidden state and codebook 0
-        codebook_embeddings = self.audio_embeddings(codebooks)
+        codebook_embeddings_full = self.audio_embeddings(codebooks)
+        # Project to decoder dimension. See decoder_h below
+        codebook_embeddings = self.projection(codebook_embeddings_full)
 
-        x = torch.cat([x[:, None], codebook_embeddings], dim=1)
+        x = torch.cat([x.unsqueeze(-2), codebook_embeddings], dim=-2)
 
         b, s = x.size(0), x.size(2)
         # Flip the sequence to
         # see https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice "compute amortization"
-        x = rearrange(x, 'b n s d -> (b s) n d')
+        x = rearrange(x, 'b n s d -> (b n) s d')
+        # print(f"FLIPPED: {x.shape}")
 
+        # raise ValueError("TEST")
         # Remove padded positions
-        codebooks = rearrange(codebooks, 'b n s -> (b s) n')
+        codebooks = rearrange(codebooks, 'b n s -> (b n) s')
+        print(f"CODEBOOKS AFTER FLIP: {codebooks.shape}")
         # TODO handle full text-only batches - mask will be all True
         codebook_mask = (codebooks == 0).all(dim=-1)
 
@@ -209,31 +221,51 @@ class Model(
         assert x_len == self.config.audio_num_codebooks
 
         # create causal mask
-        curr_decoder_mask = _index_causal_mask(self.decoder_causal_mask, indices)
+        # curr_decoder_mask = _index_causal_mask(self.decoder_causal_mask, indices)[None, None, :, :]
+        # print(curr_decoder_mask.shape)
         
         # TODO this is almost certainly wrong
-        for layer in self.decoder:
-            # TODO gradient checkpointing probably
-            x = layer(x, mask=curr_decoder_mask)
+        # TODO add compute amortization here
 
+        for layer in self.decoder.layers:
+            # TODO gradient checkpointing probably needs to be added
+            x = layer(x)
+
+        print(f"OUT SHAPE: {x.shape}")
         # Forward pass in parallel
         # TODO codebook logits
-        HIDDEN_SIZE = 1024
+
+        # TODO make this configurable
+        output_dim = self.config.audio_vocab_size if not skip_audio_proj else 1024
+        if not skip_audio_proj:
+            print(self.audio_head.shape)
+            print(x.shape)
+            # Per Sesame authors, losses for decoder are only computed on codebooks 1 and up
+            x = torch.einsum('bch, cho -> bco', x[:, 1:, :], self.audio_head)
+            
+
+        buffer_len = x_len - 1
         buffer = torch.zeros(
             x_bs,
-            x_len,
-            HIDDEN_SIZE,
+            buffer_len,
+            output_dim,
             dtype=dtype,
             device=x.device
         )
+        print(buffer.shape)
         # TODO almost certainly wrong, validate tomorrow
         buffer.scatter_(
             0,
-            indices.view(-1, 1, 1).expand(-1, x_len, x.size(-1)),
+            indices.view(-1, 1, 1).expand(-1, buffer_len, x.size(-1)),
             x,
         )
-        buffer = rearrange(buffer, '(b s) n d -> b s n d', b=b, s=s, n=HIDDEN_SIZE)
+        buffer = rearrange(buffer, '(b n) s d -> b n s d', b=b, s=buffer_len, d=output_dim)
 
+        if skip_audio_proj:
+            return buffer
+
+        buffer = torch.cat([c0_logits.unsqueeze(-2), buffer], dim=-2)
+        raise ValueError("TEST")
         return buffer
 
 

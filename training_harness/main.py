@@ -14,7 +14,7 @@ def main():
     shortcut = ShortcutLayer(1024, 256)
 
     # load model
-    model = load_csm_1b("cuda")
+    model = load_csm_1b("cuda", setup_caches=False)
     # TODO use an actually good dataset if this doesn't generalize
     train_loader, val_loader = create_dataloaders(config, model._audio_tokenizer)
 
@@ -38,7 +38,7 @@ def main():
     )
 
     # Train
-    train(config, train_loader, val_loader, model, shortcut, optimizer, scheduler)
+    train(config, train_loader, val_loader, model._model, shortcut, optimizer, scheduler)
 
 
 
