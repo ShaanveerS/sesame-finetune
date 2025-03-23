@@ -13,6 +13,7 @@ class OptimParameters(BaseModel):
     lr: float = 3e-4
     gradient_clip: float = 0.0
     freeze_backbone: bool = False
+    accumulate_steps: int = 1
 
 class DatasetConfig(BaseModel):
     num_workers: int = 12

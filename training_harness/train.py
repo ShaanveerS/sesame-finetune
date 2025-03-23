@@ -1,10 +1,9 @@
 import torch
 from einops import rearrange
-from torch.optim import Optimizer, AdamW
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from training_harness.config import TrainingConfig
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 from tqdm import tqdm
 
 from modeling.shortcut_layer import ShortcutLayer
@@ -12,7 +11,6 @@ from modeling.shortcut_layer import ShortcutLayer
 
 class TrainStepOutput(NamedTuple):
     loss: float
-    lr: float
 
 def compute_losses_mse(outputs, targets, tokens_masks):
     semantic_loss = F.mse_loss(outputs, targets, reduction="none")
@@ -29,10 +27,7 @@ def compute_losses_logits(all_logits, labels, compute_amortize_mask):
 
     # for better or worse, loss is on audio only
     codebook_labels = rearrange(labels, "b s n -> (b s n)")
-    codebook_logits = all_logits
-    print(codebook_labels.shape, codebook_logits.shape)
-
-    codebook_logits = rearrange(codebook_logits, "b s n d -> (b s n) d")
+    codebook_logits = rearrange(all_logits, "b s n d -> (b s n) d")
 
     # TODO consider weighting code0 loss more
     loss = F.cross_entropy(
@@ -40,19 +35,15 @@ def compute_losses_logits(all_logits, labels, compute_amortize_mask):
         codebook_labels,
         ignore_index=-100,
     )
-    print(f"Loss: {loss.item()}")
-    raise ValueError("TEST")
     return loss
 
 
 def train_step(
     model: torch.nn.Module,
-    shortcut: ShortcutLayer,
     batch: dict,
-    optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.LRScheduler,
     device: torch.device,
-    gradient_clip: float = 0.0,
+    accumulate_step: int = 1,
+    shortcut: Optional[ShortcutLayer] = None,
     shortcut_idx: int = 16,
 ) -> TrainStepOutput:
     """Single training step"""
@@ -70,28 +61,50 @@ def train_step(
     # outputs = shortcut(shortcut_hidden_states)
     # loss = compute_losses_mse(outputs, targets, tokens_masks)
     loss = compute_losses_logits(codebook_logits, labels, compute_amortize_mask)
+    loss = loss / accumulate_step
 
-
-    optimizer.zero_grad()
     loss.backward()
-    raise ValueError("TEST")
-    # time.sleep(0.05)
-    if gradient_clip > 0:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
-    optimizer.step()
-    scheduler.step()
-
     return TrainStepOutput(
         loss=loss,
-        lr=scheduler.get_last_lr()[0],
     )
 
 
 def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoader, model: torch.nn.Module, shortcut: ShortcutLayer, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler.LRScheduler):
-
+    global_step = 0
+    accumulate_step = 0
     device = torch.device("cuda")
     for epoch in range(config.num_epochs):
-        for batch in tqdm(train_loader):
-            print(batch.keys())
-            train_step(model, shortcut, batch, optimizer, scheduler, device, config.optim.gradient_clip)
+        pbar = tqdm(train_loader)
+        for batch in pbar:
+            output = train_step(
+                model,
+                batch=batch,
+                device=device,
+                accumulate_step=config.optim.accumulate_steps,
+            )
+            global_step += 1
+            accumulate_step += 1
+
+            if accumulate_step == config.optim.accumulate_steps:
+                if config.optim.gradient_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.optim.gradient_clip)
+                optimizer.zero_grad()
+                optimizer.step()
+                accumulate_step = 0
+                # TODO delete this, I have low VRAM
+                torch.cuda.empty_cache()
+
+            lr = scheduler.get_last_lr()[0]
+            pbar.set_description(f"Epoch {epoch}, Step {global_step}, Loss {output.loss:.4f}, LR {lr:.6f}")
+
+            if global_step == 100:
+                raise ValueError("TEST")
+
+        # TODO move this to step level
+        scheduler.step()
+    return global_step
+
+        
+
+                
 

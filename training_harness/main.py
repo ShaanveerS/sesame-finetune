@@ -18,7 +18,7 @@ def main():
     # TODO use an actually good dataset if this doesn't generalize
     train_loader, val_loader = create_dataloaders(config, model._audio_tokenizer)
 
-    # move mimi model back to CPU
+    # move mimi model back to CPU to save VRAM
     model._audio_tokenizer.to("cpu")
 
 
