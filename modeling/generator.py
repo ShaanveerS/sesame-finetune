@@ -18,11 +18,10 @@ class Segment:
     audio: torch.Tensor
 
 
-def load_llama3_tokenizer():
+def load_llama3_tokenizer(tokenizer_name: str = "unsloth/Llama-3.2-1B"):
     """
     https://github.com/huggingface/transformers/issues/22794#issuecomment-2092623992
     """
-    tokenizer_name = "unsloth/Llama-3.2-1B"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     bos = tokenizer.bos_token
     eos = tokenizer.eos_token

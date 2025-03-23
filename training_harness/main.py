@@ -22,12 +22,19 @@ def main():
     model._audio_tokenizer.to("cpu")
 
 
-    # Freeze CSM and Mimi
-    for param in model._model.parameters():
-        param.requires_grad = False
-
     for param in model._audio_tokenizer.parameters():
         param.requires_grad = False
+    if config.optim.freeze_backbone:
+        # Freeze CSM and Mimi
+        model._model.eval()
+        for param in model._model.parameters():
+            param.requires_grad = False
+
+    else:
+        model._model.p_amortize_keep_alive = config.dataset.p_amortize_keep_alive
+        model._model.train()
+    
+        
 
     # Load optimizer
     optimizer = AdamW(model._model.parameters(), lr=config.optim.lr, betas=config.optim.betas)

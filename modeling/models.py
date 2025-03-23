@@ -6,6 +6,7 @@ import torch.nn as nn
 import torchtune
 from torchtune.generation._generation import get_causal_mask_from_padding_mask
 from torchtune.models import llama3_2
+from typing import Optional, Tuple
 
 
 def llama3_2_1B() -> torchtune.modules.transformer.TransformerDecoder:
@@ -135,6 +136,7 @@ class Model(
             "decoder_causal_mask",
             _create_causal_mask(self.config.audio_num_codebooks, self.audio_head.device),
         )
+        self.p_amortize_keep_alive = 1.0
 
     def setup_caches(self, max_batch_size: int) -> torch.Tensor:
         """Setup KV caches and return a causal mask."""
@@ -161,7 +163,7 @@ class Model(
         acoustic_codes: torch.Tensor,
         key_padding_mask: torch.Tensor,
         skip_audio_proj: bool = False,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Returns raw acoustic token hidden states
         """
@@ -202,8 +204,15 @@ class Model(
         # The model was not trained with text output head though, so if this fails, this is 100% on you
         codebook_mask = (codebooks == 0).all(dim=-1)
 
+        if self.p_amortize_keep_alive < 1.0:
+            compute_amortize_mask = torch.rand_like(codebook_mask, dtype=torch.float32) > self.p_amortize_keep_alive
+            # print(f"Dropping {compute_amortize_mask.sum()} positions out of {codebooks.shape[0]}")
+            codebook_mask = torch.logical_or(codebook_mask, compute_amortize_mask)
+            compute_amortize_mask = rearrange(compute_amortize_mask, '(b n) -> b n', b=global_bsz)
+        else:
+            compute_amortize_mask = None
+
         # Extract audio positions
-        # TODO add compute amortization here
         decoder_bsz, decoder_seqlen = x.size(0), x.size(1)
         indices = torch.arange(decoder_bsz, device=x.device)[~codebook_mask]
         x = torch.index_select(x, 0, indices)
@@ -221,7 +230,6 @@ class Model(
             x = torch.einsum('bch, cho -> bco', x[:, 1:, :], self.audio_head)
 
         buffer_len = decoder_seqlen - 1
-        buffer = rearrange(x, '(b n) s d -> b n s d', b=global_bsz, s=buffer_len, d=output_dim)
 
         buffer = torch.zeros(
             decoder_bsz,
@@ -241,7 +249,7 @@ class Model(
             return buffer
 
         buffer = torch.cat([c0_logits.unsqueeze(-2), buffer], dim=-2)
-        return buffer
+        return (buffer, compute_amortize_mask)
 
 
     def generate_frame(

@@ -23,27 +23,25 @@ def compute_losses_mse(outputs, targets, tokens_masks):
     loss = torch.sum(semantic_loss) / torch.sum(acoustic_mask)
     return loss
 
-def compute_losses_logits(all_logits, labels):
+def compute_losses_logits(all_logits, labels, compute_amortize_mask):
+    if compute_amortize_mask is not None:
+        labels = labels.masked_fill(compute_amortize_mask.unsqueeze(-1), -100)
+
     # for better or worse, loss is on audio only
-    print(labels.shape)
-    print(labels[0, :64, 0])
-    # logits = all_logits[:, :, 0, :].squeeze(-2)
-    codebook_labels = rearrange(labels[:, :, 1:], "b s n -> (b s n)")
-    codebook_logits = all_logits[:, :, 1:, :]
-    print("Argmax of logits for first sample:")
-    print(codebook_logits[0, :64, 0].argmax(dim=-1))
+    codebook_labels = rearrange(labels, "b s n -> (b s n)")
+    codebook_logits = all_logits
+    print(codebook_labels.shape, codebook_logits.shape)
 
     codebook_logits = rearrange(codebook_logits, "b s n d -> (b s n) d")
 
-    print(codebook_logits.shape, codebook_labels.shape)
-    print(codebook_logits.dtype, codebook_labels.dtype)
     # TODO consider weighting code0 loss more
     loss = F.cross_entropy(
         codebook_logits,
         codebook_labels,
         ignore_index=-100,
     )
-    print(loss.item())
+    print(f"Loss: {loss.item()}")
+    raise ValueError("TEST")
     return loss
 
 
@@ -65,18 +63,18 @@ def train_step(
     labels = batch["labels"].to(device)
     acoustic_codes = batch["acoustic_codes"].to(device)
 
-    codebook_logits = model(tokens=tokens, tokens_mask=tokens_masks, acoustic_codes=acoustic_codes, key_padding_mask=pad_mask)
+    codebook_logits, compute_amortize_mask = model(tokens=tokens, tokens_mask=tokens_masks, acoustic_codes=acoustic_codes, key_padding_mask=pad_mask)
 
     # shortcut_hidden_states = acoustic_hidden_states[:, :, shortcut_idx, :]
     # # TODO do i need to squeeze n?
     # outputs = shortcut(shortcut_hidden_states)
     # loss = compute_losses_mse(outputs, targets, tokens_masks)
-    loss = compute_losses_logits(codebook_logits, labels)
-    raise ValueError("TEST")
+    loss = compute_losses_logits(codebook_logits, labels, compute_amortize_mask)
 
 
     optimizer.zero_grad()
     loss.backward()
+    raise ValueError("TEST")
     # time.sleep(0.05)
     if gradient_clip > 0:
         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)

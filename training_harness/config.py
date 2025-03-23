@@ -12,11 +12,13 @@ class OptimParameters(BaseModel):
     betas: List[float]
     lr: float = 3e-4
     gradient_clip: float = 0.0
+    freeze_backbone: bool = False
 
 class DatasetConfig(BaseModel):
     num_workers: int = 12
     batch_size: int = 8
     dataset_dir: str
+    p_amortize_keep_alive: float = 0.0625
 
 class TrainingConfig(BaseModel):
     """
