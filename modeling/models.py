@@ -9,9 +9,9 @@ from torchtune.models import llama3_2
 from typing import Optional, Tuple
 
 
-def llama3_2_1B() -> torchtune.modules.transformer.TransformerDecoder:
+def llama3_2_1B(vocab_size: int = 128_256) -> torchtune.modules.transformer.TransformerDecoder:
     return llama3_2.llama3_2(
-        vocab_size=128_256,
+        vocab_size=vocab_size,
         num_layers=16,
         num_heads=32,
         num_kv_heads=8,
@@ -25,9 +25,9 @@ def llama3_2_1B() -> torchtune.modules.transformer.TransformerDecoder:
     )
 
 
-def llama3_2_100M() -> torchtune.modules.transformer.TransformerDecoder:
+def llama3_2_100M(vocab_size: int = 128_256) -> torchtune.modules.transformer.TransformerDecoder:
     return llama3_2.llama3_2(
-        vocab_size=128_256,
+        vocab_size=vocab_size,
         num_layers=4,
         num_heads=8,
         num_kv_heads=2,
@@ -112,7 +112,7 @@ class Model(
         self.config = config
 
         self.backbone, backbone_dim = _prepare_transformer(
-            FLAVORS[config.backbone_flavor]()
+            FLAVORS[config.backbone_flavor](config.text_vocab_size)
         )
         self.decoder, decoder_dim = _prepare_transformer(
             FLAVORS[config.decoder_flavor]()

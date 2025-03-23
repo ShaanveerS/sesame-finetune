@@ -4,11 +4,14 @@ from moshi.models import MimiModel
 import torch
 from torch.utils.data import DataLoader
 from training_harness.config import TrainingConfig
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 def load_mimi_ds(config: TrainingConfig) -> Tuple[Dataset, Dataset]:
     ds = load_from_disk(config.dataset.dataset_dir)
+    if "test" not in ds:
+        ds = ds["train"].train_test_split(test_size=1)  # Split with 1 example for test set
+    
     # ignore training val split for now
     return ds["train"], ds["test"]
 
@@ -87,7 +90,7 @@ def collate_fn(batch, codebook_size: int = 32):
 
 
 
-def create_dataloaders(config: TrainingConfig, mimi_model: MimiModel, is_shortcut: bool = False) -> tuple[DataLoader, DataLoader]:
+def create_dataloaders(config: TrainingConfig, mimi_model: Optional[MimiModel], is_shortcut: bool = False) -> tuple[DataLoader, DataLoader]:
     """Create train and validation dataloaders"""
     train_ds, val_ds = load_mimi_ds(config)
 

@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 import tomllib
-from typing import List
+from typing import List, Optional
 
 
 class WandbConfig(BaseModel):
@@ -27,6 +27,10 @@ class TrainingConfig(BaseModel):
     """
 
     checkpoint_dir: str
+    init_model_path: Optional[str] = None
+    """
+    Defaults to official model
+    """
     save_every_n_steps: int = 5000
     val_size: int = 5000
     accumulate_steps: int = 8

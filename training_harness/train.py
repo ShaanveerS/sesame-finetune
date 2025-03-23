@@ -11,6 +11,8 @@ from modeling.shortcut_layer import ShortcutLayer
 
 class TrainStepOutput(NamedTuple):
     loss: float
+    code0_loss: float
+    acoustic_loss: float
 
 def compute_losses_mse(outputs, targets, tokens_masks):
     semantic_loss = F.mse_loss(outputs, targets, reduction="none")
@@ -21,22 +23,33 @@ def compute_losses_mse(outputs, targets, tokens_masks):
     loss = torch.sum(semantic_loss) / torch.sum(acoustic_mask)
     return loss
 
+from dataclasses import dataclass
+
+@dataclass
+class LossComponents:
+    code0_loss: torch.Tensor
+    acoustic_loss: torch.Tensor
+    total_loss: torch.Tensor
+
 def compute_losses_logits(all_logits, labels, compute_amortize_mask):
     if compute_amortize_mask is not None:
         labels = labels.masked_fill(compute_amortize_mask.unsqueeze(-1), -100)
 
-    # for better or worse, loss is on audio only
-    codebook_labels = rearrange(labels, "b s n -> (b s n)")
-    codebook_logits = rearrange(all_logits, "b s n d -> (b s n) d")
+    code0 = labels[:, :, 0]
+    code0_logits = all_logits[:, :, 0, :]
+    acoustic_labels = labels[:, :, 1:]
+    acoustic_logits = all_logits[:, :, 1:, :]
 
-    # TODO consider weighting code0 loss more
-    loss = F.cross_entropy(
-        codebook_logits,
-        codebook_labels,
-        ignore_index=-100,
-    )
-    return loss
+    code0 = rearrange(code0, "b s -> (b s)")
+    code0_logits = rearrange(code0_logits, "b s d -> (b s) d")
+    acoustic_labels = rearrange(acoustic_labels, "b s n -> (b s n)")
+    acoustic_logits = rearrange(acoustic_logits, "b s n d -> (b s n) d")
 
+    code0_loss = F.cross_entropy(code0_logits, code0, ignore_index=-100)
+    acoustic_loss = F.cross_entropy(acoustic_logits, acoustic_labels, ignore_index=-100)
+    total_loss = 10 * code0_loss + acoustic_loss
+
+    return LossComponents(code0_loss, acoustic_loss, total_loss)
 
 def train_step(
     model: torch.nn.Module,
@@ -60,12 +73,14 @@ def train_step(
     # # TODO do i need to squeeze n?
     # outputs = shortcut(shortcut_hidden_states)
     # loss = compute_losses_mse(outputs, targets, tokens_masks)
-    loss = compute_losses_logits(codebook_logits, labels, compute_amortize_mask)
-    loss = loss / accumulate_step
+    loss_components = compute_losses_logits(codebook_logits, labels, compute_amortize_mask)
+    loss = loss_components.total_loss / accumulate_step
 
     loss.backward()
     return TrainStepOutput(
         loss=loss,
+        code0_loss=loss_components.code0_loss,
+        acoustic_loss=loss_components.acoustic_loss,
     )
 
 
@@ -73,6 +88,13 @@ def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoad
     global_step = 0
     accumulate_step = 0
     device = torch.device("cuda")
+
+    if config.wandb.use_wandb:
+        import wandb
+        
+        wandb.init(project=config.wandb.project_name)
+        wandb.config.update(config.model_dump())
+
     for epoch in range(config.num_epochs):
         pbar = tqdm(train_loader)
         for batch in pbar:
@@ -84,6 +106,16 @@ def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoad
             )
             global_step += 1
             accumulate_step += 1
+
+            if config.wandb.use_wandb:
+                wandb.log({
+                    "train_loss": output.loss,
+                    "code0_loss": output.code0_loss,
+                    "acoustic_loss": output.acoustic_loss,
+                    "lr": scheduler.get_last_lr()[0],
+                    "global_step": global_step,
+                    "epoch": epoch,
+                })
 
             if accumulate_step == config.optim.accumulate_steps:
                 if config.optim.gradient_clip > 0:
@@ -97,11 +129,8 @@ def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoad
             lr = scheduler.get_last_lr()[0]
             pbar.set_description(f"Epoch {epoch}, Step {global_step}, Loss {output.loss:.4f}, LR {lr:.6f}")
 
-            if global_step == 100:
-                raise ValueError("TEST")
-
         # TODO move this to step level
-        scheduler.step()
+        # scheduler.step()
     return global_step
 
         

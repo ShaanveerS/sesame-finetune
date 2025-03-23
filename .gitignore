@@ -5,3 +5,4 @@ datasets
 inits
 checkpoints
 *.egg-info
+wandb
