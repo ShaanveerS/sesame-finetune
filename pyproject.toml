@@ -14,6 +14,7 @@ dependencies = [
     "numpy==2.1.0",
     "openai>=1.66.3",
     "pydantic>=2.10.6",
+    "safetensors>=0.5.3",
     "silero-vad>=5.1.2",
     "tokenizers==0.21.1",
     "torchao==0.9.0",

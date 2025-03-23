@@ -2,4 +2,6 @@
 __pycache__
 .env
 datasets
+inits
+checkpoints
 *.egg-info

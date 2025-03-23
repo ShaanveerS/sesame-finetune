@@ -1,11 +1,12 @@
 from modeling.generator import load_llama3_tokenizer
 import torch
-from typing import Tuple
+from typing import Tuple, Optional
+from transformers import AutoTokenizer
 
 
 class PromptEncoder:
-    def __init__(self):
-        self._text_tokenizer = load_llama3_tokenizer()
+    def __init__(self, tokenizer: Optional[AutoTokenizer] = None):
+        self._text_tokenizer = tokenizer if tokenizer is not None else load_llama3_tokenizer()
         pass
 
     def _tokenize_text_segment(
