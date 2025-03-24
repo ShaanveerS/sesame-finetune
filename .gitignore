@@ -6,3 +6,4 @@ inits
 checkpoints
 *.egg-info
 wandb
+output.wav

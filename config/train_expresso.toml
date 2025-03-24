@@ -15,5 +15,5 @@ accumulate_steps = 6
 num_workers = 12
 batch_size = 4
 dataset_dir = "../datasets/tokenized_expresso"
-# p_amortize_keep_alive = 0.0625
+# NOTE: Compute amortization is probably broken, leave this alone for now
 p_amortize_keep_alive = 1

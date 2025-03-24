@@ -131,6 +131,9 @@ def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoad
                         "global_step": global_step,
                         "epoch": epoch,
                     })
+
+                lr = scheduler.get_last_lr()[0]
+                pbar.set_description(f"epoch {epoch}, step {global_step}, loss {step_loss:.4f}, lr {lr:.2e}")
                 accumulate_step = 0
                 step_loss = 0
                 code0_loss = 0
@@ -138,8 +141,6 @@ def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoad
 
                 # TODO delete this: I have low VRAM so sue me
                 torch.cuda.empty_cache()
-                lr = scheduler.get_last_lr()[0]
-                pbar.set_description(f"Epoch {epoch}, Step {global_step}, Loss {step_loss:.4f}, LR {lr:.2e}")
 
 
         # TODO handle scheduling properly
