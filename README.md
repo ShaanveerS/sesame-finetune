@@ -1,4 +1,4 @@
-# CSM Finetuning
+# CSM Finetuning: Expresso proof of concept
 
 > [!WARNING] 
 > This repo is a work in progress and is not ready for general use.
@@ -41,13 +41,4 @@ uv run test_expresso.py \
     --text "There'll be a funnel cloud Monday, but it'll be mostly sunny Tuesday."
 ```
 
-have fun
-
-# configuration
-
-it checks `OPENAI_API_KEY` and `OPENAI_BASE_URL` env vars if you want to point it at whatever LLM. defaults to an
-api on localhost:8000 (if unset) to make it convenient for me personally.
-
-# resource reqs
-
-~6.5 GB VRAM + whatever your LLM uses if you run that locally
+Thanks to [nytopop](https://github.com/nytopop/illu) for the repo base.
