@@ -1,18 +1,19 @@
-checkpoint_dir = "checkpoints"
+checkpoint_dir = "../checkpoints"
 init_model_path = "../inits/csm-1b-expresso"
-num_epochs = 5
+num_epochs = 3
 
 [wandb]
 project_name = "csm_expresso"
-use_wandb = true
+use_wandb = false
 
 [optim]
 betas = [0.9, 0.95]
-lr = 5e-4
-accumulate_steps = 3
+lr = 1e-4
+accumulate_steps = 6
 
 [dataset]
 num_workers = 12
-batch_size = 12
+batch_size = 4
 dataset_dir = "../datasets/tokenized_expresso"
-p_amortize_keep_alive = 0.0625
+# p_amortize_keep_alive = 0.0625
+p_amortize_keep_alive = 1

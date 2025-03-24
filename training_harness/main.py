@@ -28,10 +28,9 @@ def main():
             model_config = json.load(f)
         model = Model(ModelArgs(**model_config))
         state_dict = load_file(f"{config.init_model_path}/model.safetensors")
-        print(state_dict.keys())
         model.load_state_dict(state_dict, strict=False)
         model.to(device="cuda", dtype=torch.bfloat16)
-        model.decoder = torch.compile(model.decoder)
+        # model.decoder = torch.compile(model.decoder)
     else:
         model = load_csm_1b("cuda", setup_caches=False)
         model._audio_tokenizer.to("cpu")
@@ -65,7 +64,7 @@ def main():
 
     # Save final model
     # TODO: proper checkpointing
-    save_file(model.state_dict(), f"{config.checkpoint_dir}/final_model.safetensors")
+    torch.save(model.state_dict(), f"{config.checkpoint_dir}/final_model.pt")
 
 
 

@@ -47,7 +47,7 @@ def compute_losses_logits(all_logits, labels, compute_amortize_mask):
 
     code0_loss = F.cross_entropy(code0_logits, code0, ignore_index=-100)
     acoustic_loss = F.cross_entropy(acoustic_logits, acoustic_labels, ignore_index=-100)
-    total_loss = 10 * code0_loss + acoustic_loss
+    total_loss = code0_loss + acoustic_loss
 
     return LossComponents(code0_loss, acoustic_loss, total_loss)
 
@@ -87,6 +87,12 @@ def train_step(
 def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoader, model: torch.nn.Module, shortcut: ShortcutLayer, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler.LRScheduler):
     global_step = 0
     accumulate_step = 0
+
+    # Logging
+    step_loss = 0
+    code0_loss = 0
+    acoustic_loss = 0
+    
     device = torch.device("cuda")
 
     if config.wandb.use_wandb:
@@ -104,36 +110,40 @@ def train(config: TrainingConfig, train_loader: DataLoader, val_loader: DataLoad
                 device=device,
                 accumulate_step=config.optim.accumulate_steps,
             )
-            global_step += 1
             accumulate_step += 1
+            step_loss += output.loss.item()
+            code0_loss += output.code0_loss.item()
+            acoustic_loss += output.acoustic_loss.item()
 
-            if config.wandb.use_wandb:
-                wandb.log({
-                    "train_loss": output.loss,
-                    "code0_loss": output.code0_loss,
-                    "acoustic_loss": output.acoustic_loss,
-                    "lr": scheduler.get_last_lr()[0],
-                    "global_step": global_step,
-                    "epoch": epoch,
-                })
 
             if accumulate_step == config.optim.accumulate_steps:
+                global_step += 1
                 if config.optim.gradient_clip > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optim.gradient_clip)
-                optimizer.zero_grad()
                 optimizer.step()
+                optimizer.zero_grad()
+                if config.wandb.use_wandb:
+                    wandb.log({
+                        "train_loss": step_loss,
+                        "code0_loss": code0_loss,
+                        "acoustic_loss": acoustic_loss,
+                        "lr": scheduler.get_last_lr()[0],
+                        "global_step": global_step,
+                        "epoch": epoch,
+                    })
                 accumulate_step = 0
-                # TODO delete this, I have low VRAM
+                step_loss = 0
+                code0_loss = 0
+                acoustic_loss = 0
+
+                # TODO delete this: I have low VRAM so sue me
                 torch.cuda.empty_cache()
+                lr = scheduler.get_last_lr()[0]
+                pbar.set_description(f"Epoch {epoch}, Step {global_step}, Loss {step_loss:.4f}, LR {lr:.2e}")
 
-            lr = scheduler.get_last_lr()[0]
-            pbar.set_description(f"Epoch {epoch}, Step {global_step}, Loss {output.loss:.4f}, LR {lr:.6f}")
 
-        # TODO move this to step level
+        # TODO handle scheduling properly
         # scheduler.step()
     return global_step
 
         
-
-                
-

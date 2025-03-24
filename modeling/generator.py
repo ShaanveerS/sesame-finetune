@@ -42,12 +42,13 @@ class Generator:
         self,
         model: Model,
         setup_caches: bool = True,
+        tokenizer_name: str = "unsloth/Llama-3.2-1B",
     ):
         self._model = model
         if setup_caches:
             self._model.setup_caches(1)
 
-        self._text_tokenizer = load_llama3_tokenizer()
+        self._text_tokenizer = load_llama3_tokenizer(tokenizer_name)
 
         device = next(model.parameters()).device
         mimi_weight = hf_hub_download(loaders.DEFAULT_REPO, loaders.MIMI_NAME)
