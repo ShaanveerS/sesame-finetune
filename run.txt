@@ -1,0 +1,8 @@
+git clone https://github.com/knottwill/sesame-finetune.git
+cd sesame-finetune
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+huggingface-cli login
+python pretokenize.py   --train_repo_id "LucaZuana/brookevoice"   --train_split_name "train"   --val_repo_id "LucaZuana/brookevoice"   --val_split_name "validation"  --device "cuda" --output "data/tokens.hdf5"
