@@ -14,6 +14,7 @@ class OptimParameters(BaseModel):
     gradient_clip: float = 0.0
     freeze_backbone: bool = False
     accumulate_steps: int = 1
+    weight_decay: float = 0.01 # Default value, adjust in TOML config
 
 class DatasetConfig(BaseModel):
     num_workers: int = 12

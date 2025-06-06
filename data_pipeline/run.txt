@@ -1,0 +1,14 @@
+
+uv sync
+uv pip install -e .
+cd data_pipeline
+huggingface cli login
+
+uv run python create_from_json.py \
+    --jsonl_metadata_file /home/shaan/Projects/audiobox-aesthetics/brooke_top80.jsonl \
+    --output_directory /home/shaan/Projects/Dataset/datasets/encoded_custom_data \
+    --batch_size 16
+
+
+
+

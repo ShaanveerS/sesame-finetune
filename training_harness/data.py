@@ -3,8 +3,10 @@ from functools import partial
 from moshi.models import MimiModel
 import torch
 from torch.utils.data import DataLoader
-from training_harness.config import TrainingConfig
+from .config import TrainingConfig
 from typing import Optional, Tuple
+import pandas as pd
+import os
 
 
 def load_mimi_ds(config: TrainingConfig) -> Tuple[Dataset, Dataset]:

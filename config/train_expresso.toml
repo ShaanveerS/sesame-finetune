@@ -1,19 +1,20 @@
 checkpoint_dir = "../checkpoints"
-init_model_path = "../inits/csm-1b-expresso"
-num_epochs = 3
+init_model_path = "/home/shaan/Projects/Dataset/csm_finetune/inits/csm-1b-expresso"
+num_epochs = 5
 
 [wandb]
 project_name = "csm_expresso"
-use_wandb = false
-
+use_wandb = true
+dataset_dir = "/home/shaan/Projects/Dataset/csm_finetune/datasets/tokenized_custom_data_no_style"
 [optim]
-betas = [0.9, 0.95]
-lr = 1e-4
-accumulate_steps = 6
+betas = [0.9, 0.99]
+lr = 1e-5
+accumulate_steps = 1
+weight_decay = 1e-4
 
 [dataset]
 num_workers = 12
 batch_size = 4
-dataset_dir = "../datasets/tokenized_expresso"
+dataset_dir = "/home/shaan/Projects/Dataset/csm_finetune/datasets/tokenized_custom_data_no_style"
 # NOTE: Compute amortization is probably broken, leave this alone for now
 p_amortize_keep_alive = 1

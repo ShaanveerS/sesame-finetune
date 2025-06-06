@@ -1,0 +1,88 @@
+batch_size:
+  type: categorical
+  values:
+    - 2
+    - 4
+    - 8
+    - 16
+    - 32
+
+learning_rate:
+  type: float
+  log: true
+  min: 1e-6
+  max: 1e-2
+
+lr_decay:
+  type: categorical
+  values:
+    - "linear"
+    - "cosine"
+    - "constant"
+
+warmup_steps:
+  type: int
+  min: 0
+  max: 100 # Adjust max as needed, e.g., based on typical num_training_steps / 10
+
+beta1:
+  type: float
+  log: false
+  min: 0.8
+  max: 0.95
+
+beta2:
+  type: float
+  log: false # Typically not log-scaled for beta2
+  min: 0.900
+  max: 0.999
+
+weight_decay:
+  type: float
+  log: true
+  min: 1e-3
+  max: 1e-1
+
+max_grad_norm: # This is handled in the training loop as gradient_clip
+  type: float
+  log: true
+  min: 0.5
+  max: 5.0
+
+grad_acc_steps: # This is accumulate_steps in TrainingConfig
+  type: int
+  min: 1
+  max: 8 # Increased max to 8 as an example, can be 3 as before
+
+freeze_backbone:
+  type: categorical
+  values:
+    - true
+    - false
+
+# Parameters from train_expresso.toml
+# These will be loaded and potentially overridden by the sweep.
+# Values here act as defaults if not swept.
+
+checkpoint_dir: "../checkpoints" # Default, can be kept or made configurable
+init_model_path: "/home/shaan/Projects/Dataset/csm_finetune/inits/csm-1b-expresso" # Default
+num_epochs: 5 # Default, can be swept if desired
+
+wandb:
+  project_name: "csm_expresso_sweep" # New project name for sweeps
+  use_wandb: true # Default, can be made configurable
+
+# optim settings from train_expresso.toml that are not directly swept above
+# but will be part of the base config and can be overridden by sweep if added here.
+optim:
+  # betas will be taken from sweep (beta1, beta2)
+  # lr, accumulate_steps, weight_decay will be taken from sweep
+  # gradient_clip (max_grad_norm) will be taken from sweep
+  # freeze_backbone will be taken from sweep
+  betas: [0.9, 0.99] # Original default, will be overridden by beta1 & beta2 from sweep
+
+dataset:
+  num_workers: 12 # Default
+  # batch_size will be overridden by sweep
+  dataset_dir: "/home/shaan/Projects/Dataset/csm_finetune/datasets/tokenized_custom_data_no_style" # Default
+  p_amortize_keep_alive: 1 # Default 
